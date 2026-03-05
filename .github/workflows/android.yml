@@ -17,64 +17,61 @@ jobs:
     timeout-minutes: 90
 
     steps:
-      - uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: "3.10"
 
-      - name: Set up Java 17
+      - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: "17"
 
-      - name: Install system dependencies
+      - name: Install Linux dependencies
         run: |
           sudo apt update
           sudo apt install -y \
-            zip unzip \
-            autoconf libtool pkg-config \
+            git zip unzip openjdk-17-jdk \
+            autoconf automake libtool \
+            libltdl-dev pkg-config \
             zlib1g-dev libncurses5-dev \
             libncursesw5-dev libtinfo5 \
-            cmake libffi-dev libssl-dev
+            cmake libffi-dev libssl-dev \
+            build-essential \
+            ccache \
+            libstdc++6
 
-      - name: Install Buildozer toolchain
+      - name: Install Python dependencies
         run: |
-          python -m pip install --upgrade pip setuptools wheel
-          python -m pip install buildozer==1.5.0 cython==0.29.36
+          python -m pip install --upgrade pip
+          python -m pip install \
+            buildozer==1.5.0 \
+            cython==0.29.36 \
+            virtualenv
 
-      - name: Initialize Android SDK/NDK
+      - name: Initialize Android SDK + NDK
         run: |
           mkdir -p artifacts
           (yes || true) | buildozer android update 2>&1 | tee artifacts/buildozer-update.log
           exit ${PIPESTATUS[1]}
 
-      - name: Accept Android SDK licenses
+      - name: Accept Android licenses
         run: |
-          accepted=0
           for sdk_root in \
             "$ANDROID_SDK_ROOT" \
             "$ANDROID_HOME" \
             "$HOME/.buildozer/android/platform/android-sdk"; do
-            for candidate in \
-              "$sdk_root/cmdline-tools/latest/bin/sdkmanager" \
-              "$sdk_root/cmdline-tools/tools/bin/sdkmanager" \
-              "$sdk_root/tools/bin/sdkmanager"; do
-              if [ -x "$candidate" ]; then
-                yes | "$candidate" --licenses
-                accepted=1
-                break
+              if [ -d "$sdk_root" ]; then
+                if [ -f "$sdk_root/cmdline-tools/latest/bin/sdkmanager" ]; then
+                  yes | "$sdk_root/cmdline-tools/latest/bin/sdkmanager" --licenses
+                fi
               fi
-            done
-            if [ "$accepted" -eq 1 ]; then
-              break
-            fi
           done
-          if [ "$accepted" -eq 0 ]; then
-            echo "sdkmanager not found; continuing because Buildozer may manage licenses internally."
-          fi
 
       - name: Build APK
         run: |
@@ -92,10 +89,10 @@ jobs:
             artifacts/buildozer.log
           if-no-files-found: warn
 
-      - name: Upload APK artifact
+      - name: Upload APK
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: paski-future-1-0-apk
+          name: paski-future-apk
           path: bin/*.apk
           if-no-files-found: error
