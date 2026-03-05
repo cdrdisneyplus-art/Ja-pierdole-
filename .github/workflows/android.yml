@@ -1,88 +1,76 @@
-name: Build Paski Future APK
+name: Build APK
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     steps:
-
-    - name: Run actions/checkout@v4
+    - name: Checkout repository
       uses: actions/checkout@v4
 
-    - name: Set up Python
+    - name: Setup Python
       uses: actions/setup-python@v5
       with:
-        python-version: '3.10'
+        python-version: 3.10
 
-    - name: Set up Java 17
+    - name: Setup Java
       uses: actions/setup-java@v4
       with:
-        distribution: 'temurin'
-        java-version: '17'
+        distribution: temurin
+        java-version: 17
 
     - name: Install system dependencies
       run: |
         sudo apt update
         sudo apt install -y \
-        git zip unzip autoconf libtool pkg-config \
-        zlib1g-dev libncurses5-dev \
-        libtinfo6 cmake libffi-dev \
-        libssl-dev
+        git zip unzip openjdk-17-jdk \
+        autoconf libtool pkg-config \
+        zlib1g-dev libncurses-dev \
+        libtinfo6 cmake \
+        libffi-dev libssl-dev
 
-    - name: Install Buildozer toolchain
+    - name: Install Buildozer
       run: |
         pip install --upgrade pip
         pip install buildozer cython
 
-    - name: Initialize Android SDK/NDK
+    - name: Install Android SDK
       run: |
+        mkdir -p $HOME/android-sdk
+        cd $HOME/android-sdk
 
-        mkdir -p ~/.android
-        touch ~/.android/repositories.cfg
+        wget https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O tools.zip
+        unzip tools.zip
+        rm tools.zip
 
-        export ANDROID_HOME=$HOME/android-sdk
-        mkdir -p $ANDROID_HOME
+        mkdir -p cmdline-tools/latest
+        mv cmdline-tools/* cmdline-tools/latest/ || true
 
-        cd $HOME
+        echo "ANDROID_HOME=$HOME/android-sdk" >> $GITHUB_ENV
+        echo "ANDROID_SDK_ROOT=$HOME/android-sdk" >> $GITHUB_ENV
+        echo "$HOME/android-sdk/cmdline-tools/latest/bin" >> $GITHUB_PATH
+        echo "$HOME/android-sdk/platform-tools" >> $GITHUB_PATH
 
-        wget https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O sdk.zip
-        unzip sdk.zip
+    - name: Install SDK packages
+      run: |
+        yes | sdkmanager --licenses
 
-        mkdir -p $ANDROID_HOME/cmdline-tools
-        mv cmdline-tools $ANDROID_HOME/cmdline-tools/latest
-
-        echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
-        echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> $GITHUB_PATH
-        echo "$ANDROID_HOME/platform-tools" >> $GITHUB_PATH
-
-        $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --sdk_root=$ANDROID_HOME \
+        sdkmanager \
         "platform-tools" \
         "platforms;android-33" \
         "build-tools;33.0.2" \
         "ndk;25.2.9519653"
 
-    - name: Accept Android SDK licenses
-      run: |
-        yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses
-
     - name: Build APK
       run: |
+        buildozer android clean
         buildozer android debug
 
-    - name: Upload build logs
+    - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
-        name: build-logs
-        path: .buildozer/**/*.log
-
-    - name: Upload APK artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: paski-future-apk
+        name: apk
         path: bin/*.apk
