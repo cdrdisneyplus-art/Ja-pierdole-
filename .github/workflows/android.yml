@@ -1,99 +1,101 @@
-name: Build APK
+name: Build Paski Future 1.0 APK
 
 on:
-  push:
-    branches: [ main ]
   workflow_dispatch:
+    inputs:
+      build_mode:
+        description: "Build variant"
+        required: true
+        default: "debug"
+        type: choice
+        options:
+          - debug
 
 jobs:
   build:
     runs-on: ubuntu-22.04
+    timeout-minutes: 90
 
     steps:
+      - uses: actions/checkout@v4
 
-    - name: Checkout repository
-      uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
 
-    - name: Setup Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: "3.10.18"
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
 
-    - name: Setup Java
-      uses: actions/setup-java@v4
-      with:
-        distribution: temurin
-        java-version: "17"
+      - name: Install system dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y \
+            zip unzip \
+            autoconf libtool pkg-config \
+            zlib1g-dev libncurses5-dev \
+            libncursesw5-dev libtinfo5 \
+            cmake libffi-dev libssl-dev
 
-    - name: Install system dependencies
-      run: |
-        sudo apt update
-        sudo apt install -y \
-        build-essential \
-        git \
-        zip \
-        unzip \
-        openjdk-17-jdk \
-        autoconf \
-        libtool \
-        pkg-config \
-        zlib1g-dev \
-        libncurses5 \
-        libstdc++6 \
-        libffi-dev \
-        libssl-dev \
-        libsqlite3-dev \
-        libltdl-dev \
-        libc6-dev \
-        wget \
-        curl \
-        cmake \
-        ninja-build
+      - name: Install Buildozer toolchain
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install buildozer==1.5.0 cython==0.29.36
 
-    - name: Install Buildozer
-      run: |
-        python -m pip install --upgrade pip
-        pip install buildozer cython
+      - name: Initialize Android SDK/NDK
+        run: |
+          mkdir -p artifacts
+          (yes || true) | buildozer android update 2>&1 | tee artifacts/buildozer-update.log
+          exit ${PIPESTATUS[1]}
 
-    - name: Install Android SDK
-      run: |
-        mkdir -p $HOME/android-sdk/cmdline-tools
-        cd $HOME/android-sdk
+      - name: Accept Android SDK licenses
+        run: |
+          accepted=0
+          for sdk_root in \
+            "$ANDROID_SDK_ROOT" \
+            "$ANDROID_HOME" \
+            "$HOME/.buildozer/android/platform/android-sdk"; do
+            for candidate in \
+              "$sdk_root/cmdline-tools/latest/bin/sdkmanager" \
+              "$sdk_root/cmdline-tools/tools/bin/sdkmanager" \
+              "$sdk_root/tools/bin/sdkmanager"; do
+              if [ -x "$candidate" ]; then
+                yes | "$candidate" --licenses
+                accepted=1
+                break
+              fi
+            done
+            if [ "$accepted" -eq 1 ]; then
+              break
+            fi
+          done
+          if [ "$accepted" -eq 0 ]; then
+            echo "sdkmanager not found; continuing because Buildozer may manage licenses internally."
+          fi
 
-        wget https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O sdk.zip
-        unzip sdk.zip
-        rm sdk.zip
+      - name: Build APK
+        run: |
+          mkdir -p artifacts
+          (yes || true) | buildozer android debug 2>&1 | tee artifacts/buildozer.log
+          exit ${PIPESTATUS[1]}
 
-        mkdir -p cmdline-tools/latest
-        mv cmdline-tools/* cmdline-tools/latest/ || true
+      - name: Upload build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: buildozer-logs
+          path: |
+            artifacts/buildozer-update.log
+            artifacts/buildozer.log
+          if-no-files-found: warn
 
-        echo "ANDROID_HOME=$HOME/android-sdk" >> $GITHUB_ENV
-        echo "ANDROID_SDK_ROOT=$HOME/android-sdk" >> $GITHUB_ENV
-        echo "$HOME/android-sdk/cmdline-tools/latest/bin" >> $GITHUB_PATH
-        echo "$HOME/android-sdk/platform-tools" >> $GITHUB_PATH
-
-    - name: Install SDK packages
-      run: |
-        yes | sdkmanager --licenses
-
-        sdkmanager \
-        "platform-tools" \
-        "platforms;android-33" \
-        "build-tools;33.0.2" \
-        "ndk;25.2.9519653"
-
-    - name: Build APK
-      run: |
-        buildozer -v android debug
-
-    - name: Upload build logs
-      uses: actions/upload-artifact@v4
-      with:
-        name: build-logs
-        path: .buildozer
-
-    - name: Upload APK
-      uses: actions/upload-artifact@v4
-      with:
-        name: apk
-        path: bin/*.apk
+      - name: Upload APK artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: paski-future-1-0-apk
+          path: bin/*.apk
+          if-no-files-found: error
